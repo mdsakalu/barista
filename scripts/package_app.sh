@@ -19,11 +19,18 @@ if [[ ! -d "$TEMPLATE_APP" ]]; then
   exit 1
 fi
 
+BUNDLE_PATH="$ROOT_DIR/.build/release/Barista_BaristaApp.bundle"
+
 mkdir -p "$OUT_DIR"
 rm -rf "$OUT_APP"
 cp -R "$TEMPLATE_APP" "$OUT_APP"
 mkdir -p "$OUT_APP/Contents/MacOS"
 cp "$BIN_PATH" "$OUT_APP/Contents/MacOS/$APP_NAME"
+
+# Copy resource bundle
+if [[ -d "$BUNDLE_PATH" ]]; then
+  cp -R "$BUNDLE_PATH" "$OUT_APP/Contents/Resources/"
+fi
 
 if [[ -f "$ROOT_DIR/ATTRIBUTION.md" ]]; then
   cp "$ROOT_DIR/ATTRIBUTION.md" "$OUT_APP/Contents/Resources/ATTRIBUTION.md"
