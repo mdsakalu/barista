@@ -27,7 +27,7 @@ A menu bar app that wraps the built-in `/usr/bin/caffeinate` command-line utilit
 
 ### Homebrew
 ```bash
-brew tap mdsakalu/barista
+brew tap mdsakalu/tap
 brew install --cask barista
 ```
 
