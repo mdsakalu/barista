@@ -7,9 +7,10 @@ A menu bar app that wraps `/usr/bin/caffeinate` for quick keep-awake control
 [<img src="https://img.shields.io/github/actions/workflow/status/mdsakalu/barista/ci.yml?label=build&logo=github" />](https://github.com/mdsakalu/barista/actions)
 [<img src="https://img.shields.io/github/v/release/mdsakalu/barista?label=release&logo=github" />](https://github.com/mdsakalu/barista/releases/latest)
 [<img src="https://img.shields.io/github/downloads/mdsakalu/barista/total?label=downloads&logo=github" />](https://github.com/mdsakalu/barista/releases)
-[<img src="https://img.shields.io/badge/Homebrew-mdsakalu/tap/barista-orange?logo=homebrew" />](https://github.com/mdsakalu/homebrew-tap)
+[<img src="https://img.shields.io/badge/Homebrew-mdsakalu/tap/barista-orange?logo=homebrew" />](https://github.com/mdsakalu/homebrew-tap/blob/main/Casks/barista.rb)
+[<img src="https://img.shields.io/badge/Swift-5.9+-F05138?logo=swift&logoColor=white" />](https://swift.org)
 [<img src="https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey?logo=apple" />](https://www.apple.com/macos)
-[<img src="https://img.shields.io/github/license/mdsakalu/barista" />](LICENSE)
+[<img src="https://img.shields.io/github/license/mdsakalu/barista?logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNCAxNiI%2BPHBhdGggZmlsbD0id2hpdGUiIGZpbGwtcnVsZT0iZXZlbm9kZCIgZD0iTTcgNGMtLjgzIDAtMS41LS42Ny0xLjUtMS41UzYuMTcgMSA3IDFzMS41LjY3IDEuNSAxLjVTNy44MyA0IDcgNHptNyA2YzAgMS4xMS0uODkgMi0yIDJoLTFjLTEuMTEgMC0yLS44OS0yLTJsMi00aC0xYy0uNTUgMC0xLS40NS0xLTFIOHY4Yy40MiAwIDEgLjQ1IDEgMWgxYy40MiAwIDEgLjQ1IDEgMUgzYzAtLjU1LjU4LTEgMS0xaDFjMC0uNTUuNTgtMSAxLTFoLjAzTDYgNUg1YzAgLjU1LS40NSAxLTEgMUgzbDIgNGMwIDEuMTEtLjg5IDItMiAySDJjLTEuMTEgMC0yLS44OS0yLTJsMi00SDFWNWgzYzAtLjU1LjQ1LTEgMS0xaDRjLjU1IDAgMSAuNDUgMSAxaDN2MWgtMWwyIDR6TTIuNSA3TDEgMTBoM0wyLjUgN3pNMTMgMTBsLTEuNS0zLTEuNSAzaDN6Ii8%2BPC9zdmc%2B" />](LICENSE)
 
 <table>
   <tr>
