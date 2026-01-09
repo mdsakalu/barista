@@ -1,0 +1,12 @@
+.DS_Store
+.build/
+.swiftpm/
+xcuserdata/
+*.xcuserstate
+build/
+dist/.DS_Store
+dist/Barista.app/Contents/MacOS/Barista
+dist/Barista.app/Contents/_CodeSignature/
+
+# Dev files
+/Screenshot*.png

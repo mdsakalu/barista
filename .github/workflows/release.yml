@@ -1,0 +1,31 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: swift build -c release
+
+      - name: Package app
+        run: scripts/package_app.sh build
+
+      - name: Archive app
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent build/Barista.app build/Barista-macos.zip
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/Barista-macos.zip
+          generate_release_notes: true
