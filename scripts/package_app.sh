@@ -27,9 +27,9 @@ cp -R "$TEMPLATE_APP" "$OUT_APP"
 mkdir -p "$OUT_APP/Contents/MacOS"
 cp "$BIN_PATH" "$OUT_APP/Contents/MacOS/$APP_NAME"
 
-# Copy resource bundle
+# Copy resource bundle (must be at app root for Bundle.main.bundleURL)
 if [[ -d "$BUNDLE_PATH" ]]; then
-  cp -R "$BUNDLE_PATH" "$OUT_APP/Contents/Resources/"
+  cp -R "$BUNDLE_PATH" "$OUT_APP/"
 fi
 
 if [[ -f "$ROOT_DIR/ATTRIBUTION.md" ]]; then
