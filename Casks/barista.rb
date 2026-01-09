@@ -1,6 +1,6 @@
 cask "barista" do
-  version "0.1.0"
-  sha256 "f8e437991cb41dfbc8b5939d9837d98b3861dcc84f3f147168b9dbac3f04a9a4"
+  version "0.1.1"
+  sha256 "c6d216596b2c41e79bf574c7e6b30ef9176de8538859c24b46461ce4ea0d0cd2"
 
   url "https://github.com/mdsakalu/barista/releases/download/v#{version}/Barista-macos.zip"
   name "Barista"
