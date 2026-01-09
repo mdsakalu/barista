@@ -9,6 +9,11 @@ cask "barista" do
 
   app "Barista.app"
 
+  postflight do
+    system_command "/usr/bin/xattr",
+      args: ["-cr", "#{appdir}/Barista.app"]
+  end
+
   zap trash: [
     "~/Library/Preferences/com.mdsakalu.barista.plist"
   ]
