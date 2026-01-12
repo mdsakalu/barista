@@ -5,6 +5,7 @@ import SwiftUI
 struct BaristaApp: App {
     @StateObject private var controller = CaffeinateController()
     @State private var isDarkMode: Bool = false
+    @StateObject private var panelVisibility = PanelVisibilityMonitor()
 
     @AppStorage("barista.preventDisplaySleep") private var preventDisplaySleep: Bool = false
     @AppStorage("barista.preventIdleSleep") private var preventIdleSleep: Bool = true
@@ -66,13 +67,17 @@ struct BaristaApp: App {
                 .overlay(alignment: .topTrailing) {
                     ZStack {
                         MoleculeActiveGlow(colors: MoleculeStyle.catppuccinLatte.glowColors,
-                                           isActive: controller.isActive)
+                                           isActive: controller.isActive,
+                                           isVisible: panelVisibility.isVisible)
                             .frame(width: 96, height: 96)
                         MoleculeIcon(style: .catppuccinLatte)
                             .frame(width: 72, height: 72)
                     }
                     .offset(y: -6)
                 }
+                .background(WindowAccessor { window in
+                    panelVisibility.attach(to: window)
+                })
 
             HStack(alignment: .firstTextBaseline, spacing: 16) {
                 assertionsSection
@@ -540,6 +545,69 @@ private struct SectionHeightReader: View {
     }
 }
 
+private final class PanelVisibilityMonitor: ObservableObject {
+    @Published var isVisible: Bool = true
+
+    private weak var window: NSWindow?
+    private var observers: [NSObjectProtocol] = []
+
+    func attach(to window: NSWindow?) {
+        guard let window, window !== self.window else { return }
+        detach()
+        self.window = window
+        isVisible = window.isVisible
+
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
+            self?.setVisible(true)
+        })
+        observers.append(center.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
+            self?.setVisible(false)
+        })
+        observers.append(center.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+            self?.setVisible(false)
+        })
+    }
+
+    deinit {
+        detach()
+    }
+
+    private func detach() {
+        observers.forEach { NotificationCenter.default.removeObserver($0) }
+        observers.removeAll()
+        window = nil
+    }
+
+    private func setVisible(_ value: Bool) {
+        if Thread.isMainThread {
+            isVisible = value
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.isVisible = value
+            }
+        }
+    }
+}
+
+private struct WindowAccessor: NSViewRepresentable {
+    let onWindow: (NSWindow?) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { [weak view] in
+            onWindow(view?.window)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { [weak nsView] in
+            onWindow(nsView?.window)
+        }
+    }
+}
+
 private enum MoleculeStyle: String, CaseIterable, Identifiable {
     case catppuccinLatte
 
@@ -737,38 +805,45 @@ private struct Bond {
 private struct MoleculeActiveGlow: View {
     let colors: [Color]
     let isActive: Bool
+    let isVisible: Bool
 
     private let transitionDuration: TimeInterval = 3
+    private let tickInterval: TimeInterval = 0.12
 
     var body: some View {
-        TimelineView(.animation) { context in
-            let color = interpolatedColor(at: context.date)
-            GeometryReader { geo in
-                let size = min(geo.size.width, geo.size.height)
-                let glowRadius = size * 0.55
-                let innerRadius = size * 0.18
-                let outerRadius = size * 0.32
+        Group {
+            if isActive && isVisible {
+                TimelineView(.periodic(from: .now, by: tickInterval)) { context in
+                    let color = interpolatedColor(at: context.date)
+                    GeometryReader { geo in
+                        let size = min(geo.size.width, geo.size.height)
+                        let glowRadius = size * 0.55
+                        let innerRadius = size * 0.18
+                        let outerRadius = size * 0.32
 
-                ZStack {
-                    Circle()
-                        .fill(
-                            RadialGradient(colors: [
-                                color.opacity(0.9),
-                                color.opacity(0.45),
-                                color.opacity(0)
-                            ], center: .center, startRadius: 0, endRadius: glowRadius)
-                        )
+                        ZStack {
+                            Circle()
+                                .fill(
+                                    RadialGradient(colors: [
+                                        color.opacity(0.9),
+                                        color.opacity(0.45),
+                                        color.opacity(0)
+                                    ], center: .center, startRadius: 0, endRadius: glowRadius)
+                                )
+                                .frame(width: size, height: size)
+                                .blur(radius: outerRadius)
+
+                            Circle()
+                                .fill(color.opacity(0.55))
+                                .frame(width: size * 0.5, height: size * 0.5)
+                                .blur(radius: innerRadius)
+                        }
                         .frame(width: size, height: size)
-                        .blur(radius: outerRadius)
-
-                    Circle()
-                        .fill(color.opacity(0.55))
-                        .frame(width: size * 0.5, height: size * 0.5)
-                        .blur(radius: innerRadius)
+                    }
                 }
-                .frame(width: size, height: size)
+            } else {
+                Color.clear
             }
-            .opacity(isActive ? 1.0 : 0)
         }
     }
 
