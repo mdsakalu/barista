@@ -42,6 +42,31 @@ struct BaristaApp: App {
                         .monospacedDigit()
                 }
             }
+            .contextMenu {
+                Button(controller.isActive ? "Stop" : "Start") {
+                    controller.toggle(with: configuration, summary: configurationSummaryWithDetails)
+                }
+                .disabled(!controller.isActive && configuration.validationMessage != nil)
+
+                Menu("Quick Duration") {
+                    Button("5m") { startQuickDuration(5, .minutes) }
+                    Button("15m") { startQuickDuration(15, .minutes) }
+                    Button("30m") { startQuickDuration(30, .minutes) }
+                    Button("1h") { startQuickDuration(1, .hours) }
+                    Button("2h") { startQuickDuration(2, .hours) }
+                }
+
+                Divider()
+
+                Button("About Barista") {
+                    NSApplication.shared.activate(ignoringOtherApps: true)
+                    NSApplication.shared.orderFrontStandardAboutPanel(nil)
+                }
+
+                Button("Quit") {
+                    NSApplication.shared.terminate(nil)
+                }
+            }
         }
         .menuBarExtraStyle(.window)
     }
@@ -446,6 +471,11 @@ struct BaristaApp: App {
         durationValue = value
         durationUnitRaw = unit.rawValue
         sessionModeRaw = SessionMode.timeout.rawValue
+    }
+
+    private func startQuickDuration(_ value: Int, _ unit: DurationUnit) {
+        setDuration(value, unit)
+        controller.restart(with: configuration, summary: configurationSummaryWithDetails)
     }
 
     private func refreshProcessList() {

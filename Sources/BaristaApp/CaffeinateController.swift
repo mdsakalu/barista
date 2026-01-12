@@ -20,6 +20,15 @@ final class CaffeinateController: ObservableObject {
         }
     }
 
+    func restart(with configuration: CaffeinateConfiguration, summary: String) {
+        if isActive {
+            stop()
+            startAfterStop(configuration: configuration, summary: summary, attempts: 0)
+        } else {
+            start(with: configuration, summary: summary)
+        }
+    }
+
     func start(with configuration: CaffeinateConfiguration, summary: String) {
         guard process == nil else { return }
         guard let arguments = configuration.buildArguments() else {
@@ -109,6 +118,19 @@ final class CaffeinateController: ObservableObject {
             return String(format: "%d:%02d:%02d", hours, minutes, seconds)
         }
         return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    private func startAfterStop(configuration: CaffeinateConfiguration, summary: String, attempts: Int) {
+        guard process != nil else {
+            start(with: configuration, summary: summary)
+            return
+        }
+        if attempts >= 20 {
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.startAfterStop(configuration: configuration, summary: summary, attempts: attempts + 1)
+        }
     }
 
     private func clearCountdown() {
