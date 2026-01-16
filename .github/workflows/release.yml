@@ -29,3 +29,13 @@ jobs:
         with:
           files: build/Barista-macos.zip
           generate_release_notes: true
+
+      - name: Update Homebrew tap
+        uses: mislav/bump-homebrew-formula-action@v3
+        with:
+          formula-name: barista
+          formula-path: Casks/barista.rb
+          homebrew-tap: mdsakalu/homebrew-tap
+          download-url: https://github.com/mdsakalu/barista/releases/download/${{ github.ref_name }}/Barista-macos.zip
+        env:
+          COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
