@@ -10,3 +10,11 @@ This project includes the background image `CaffeineCrystals_Fibrous_10xDarkFiel
 - Changes: Displayed as a cropped/filled background with opacity and gradient overlay at runtime.
 
 The file is also available under the GNU Free Documentation License (GFDL); this project uses the CC BY-SA 3.0 license option.
+
+This project includes the GitHub mark icon `GitHub-Mark.svg`.
+
+- Title: GitHub Mark (Octicons)
+- Author: GitHub
+- Source: https://primer.style/octicons/icon/mark-github-16/
+- License: MIT License
+- Changes: Converted to PNG and rendered as a template icon tinted in the About dialog.

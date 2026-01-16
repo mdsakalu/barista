@@ -7,10 +7,55 @@ final class CaffeinateController: ObservableObject {
     @Published var activeSummary: String = "Idle sleep (default) | Manual"
     @Published private(set) var remainingTimeText: String? = nil
 
+    private static let caffeinatePidKey = "barista.caffeinatePid"
     private var process: Process?
     private let caffeinatePath = "/usr/bin/caffeinate"
     private var countdownTimer: Timer?
     private var countdownEnd: Date?
+
+    static func cleanupOrphanedProcess() {
+        let defaults = UserDefaults.standard
+        guard let storedPid = defaults.object(forKey: caffeinatePidKey) as? Int, storedPid > 0 else {
+            return
+        }
+        defer { defaults.removeObject(forKey: caffeinatePidKey) }
+
+        guard isCaffeinateProcess(pid: storedPid) else { return }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/kill")
+        process.arguments = ["-TERM", "\(storedPid)"]
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            // Best effort; cleanup still clears the stored pid.
+        }
+    }
+
+    static func trackedPidInfo() -> (pid: Int, isRunning: Bool)? {
+        let defaults = UserDefaults.standard
+        guard let storedPid = defaults.object(forKey: caffeinatePidKey) as? Int, storedPid > 0 else {
+            return nil
+        }
+        return (storedPid, isCaffeinateProcess(pid: storedPid))
+    }
+
+    static func terminateTrackedProcess() {
+        let defaults = UserDefaults.standard
+        defer { defaults.removeObject(forKey: caffeinatePidKey) }
+        guard let info = trackedPidInfo(), info.isRunning else { return }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/kill")
+        process.arguments = ["-TERM", "\(info.pid)"]
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            // Best effort cleanup.
+        }
+    }
 
     func toggle(with configuration: CaffeinateConfiguration, summary: String) {
         if isActive {
@@ -47,12 +92,14 @@ final class CaffeinateController: ObservableObject {
                 self?.isActive = false
                 self?.statusText = "Inactive"
                 self?.clearCountdown()
+                self?.clearStoredPid()
             }
         }
 
         do {
             try process.run()
             self.process = process
+            storeProcessPid(process.processIdentifier)
             isActive = true
             activeSummary = summary
             statusText = "Active"
@@ -138,5 +185,36 @@ final class CaffeinateController: ObservableObject {
         countdownTimer = nil
         countdownEnd = nil
         remainingTimeText = nil
+    }
+
+    private func storeProcessPid(_ pid: Int32) {
+        UserDefaults.standard.set(Int(pid), forKey: Self.caffeinatePidKey)
+    }
+
+    private func clearStoredPid() {
+        UserDefaults.standard.removeObject(forKey: Self.caffeinatePidKey)
+    }
+
+    private static func isCaffeinateProcess(pid: Int) -> Bool {
+        let output = runTool("/bin/ps", arguments: ["-p", "\(pid)", "-o", "args="])
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return trimmed.contains("caffeinate")
+    }
+
+    private static func runTool(_ path: String, arguments: [String]) -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = arguments
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        do {
+            try process.run()
+        } catch {
+            return ""
+        }
+        process.waitUntilExit()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8) ?? ""
     }
 }

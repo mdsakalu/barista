@@ -1,77 +1,233 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @main
 struct BaristaApp: App {
-    @StateObject private var controller = CaffeinateController()
-    @State private var isDarkMode: Bool = false
-    @StateObject private var panelVisibility = PanelVisibilityMonitor()
-
-    @AppStorage("barista.preventDisplaySleep") private var preventDisplaySleep: Bool = false
-    @AppStorage("barista.preventIdleSleep") private var preventIdleSleep: Bool = true
-    @AppStorage("barista.preventDiskSleep") private var preventDiskSleep: Bool = false
-    @AppStorage("barista.preventSystemSleep") private var preventSystemSleep: Bool = false
-    @AppStorage("barista.declareUserActive") private var declareUserActive: Bool = false
-    @AppStorage("barista.sessionMode") private var sessionModeRaw: String = SessionMode.manual.rawValue
-    @AppStorage("barista.durationValue") private var durationValue: Int = 30
-    @AppStorage("barista.durationUnit") private var durationUnitRaw: String = DurationUnit.minutes.rawValue
-    @AppStorage("barista.waitPid") private var waitPidText: String = ""
-    @AppStorage("barista.waitPidName") private var waitPidName: String = ""
-    @AppStorage("barista.commandLine") private var commandLine: String = ""
-
-    @State private var processList: [RunningProcess]
-    @State private var lastProcessRefresh: Date?
-    @State private var selectedProcessId: Int = -1
-    @State private var isSettingPidFromPicker: Bool = false
-    @State private var sectionHeight: CGFloat = 0
-
-    init() {
-        let initialList = ProcessLister.fetch()
-        _processList = State(initialValue: initialList)
-        _lastProcessRefresh = State(initialValue: initialList.isEmpty ? nil : Date())
-    }
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra {
-            content
-        } label: {
-            HStack(spacing: 6) {
-                statusIcon
-                if let labelText = menuLabelText {
-                    Text(labelText)
-                        .monospacedDigit()
-                }
-            }
-            .contextMenu {
-                Button(controller.isActive ? "Stop" : "Start") {
-                    controller.toggle(with: configuration, summary: configurationSummaryWithDetails)
-                }
-                .disabled(!controller.isActive && configuration.validationMessage != nil)
-
-                Menu("Quick Duration") {
-                    Button("5m") { startQuickDuration(5, .minutes) }
-                    Button("15m") { startQuickDuration(15, .minutes) }
-                    Button("30m") { startQuickDuration(30, .minutes) }
-                    Button("1h") { startQuickDuration(1, .hours) }
-                    Button("2h") { startQuickDuration(2, .hours) }
-                }
-
-                Divider()
-
-                Button("About Barista") {
-                    NSApplication.shared.activate(ignoringOtherApps: true)
-                    NSApplication.shared.orderFrontStandardAboutPanel(nil)
-                }
-
-                Button("Quit") {
-                    NSApplication.shared.terminate(nil)
-                }
-            }
+        Settings {
+            EmptyView()
         }
-        .menuBarExtraStyle(.window)
+    }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let controller = CaffeinateController()
+    private var statusItem: NSStatusItem?
+    private let popover = NSPopover()
+    private var aboutWindow: NSWindow?
+    private var cancellables: Set<AnyCancellable> = []
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        BaristaDefaults.register()
+        CaffeinateController.cleanupOrphanedProcess()
+        NSApp.setActivationPolicy(.accessory)
+        setupPopover()
+        setupStatusItem()
+        observeController()
     }
 
-    private var menuLabelText: String? {
+    func applicationWillTerminate(_ notification: Notification) {
+        controller.stop()
+    }
+
+    private func setupPopover() {
+        let panelView = BaristaPanelView(controller: controller)
+        let hostingController = NSHostingController(rootView: panelView)
+        popover.contentViewController = hostingController
+        popover.behavior = .transient
+        popover.animates = true
+    }
+
+    private func setupStatusItem() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        guard let button = statusItem?.button else { return }
+        button.image = StatusIcon.image(active: controller.isActive)
+        button.image?.isTemplate = true
+        button.target = self
+        button.action = #selector(handleStatusItemClick(_:))
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        updateStatusItemDisplay()
+    }
+
+    private func observeController() {
+        controller.$isActive
+            .combineLatest(controller.$remainingTimeText)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _, _ in
+                self?.updateStatusItemDisplay()
+            }
+            .store(in: &cancellables)
+    }
+
+    @objc private func handleStatusItemClick(_ sender: NSStatusBarButton) {
+        let event = NSApp.currentEvent
+        if event?.type == .rightMouseUp || event?.type == .rightMouseDown {
+            if popover.isShown {
+                popover.performClose(nil)
+            }
+            showContextMenu(event: event, button: sender)
+        } else {
+            togglePopover(button: sender)
+        }
+    }
+
+    private func togglePopover(button: NSStatusBarButton) {
+        if popover.isShown {
+            popover.performClose(nil)
+            return
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        let anchorRect = popoverAnchorRect(for: button)
+        popover.show(relativeTo: anchorRect, of: button, preferredEdge: .minY)
+    }
+
+    private func popoverAnchorRect(for button: NSStatusBarButton) -> NSRect {
+        if let cell = button.cell as? NSButtonCell {
+            let imageRect = cell.imageRect(forBounds: button.bounds)
+            if !imageRect.isEmpty {
+                return imageRect
+            }
+        }
+        return button.bounds
+    }
+
+    private func showContextMenu(event: NSEvent?, button: NSStatusBarButton) {
+        let menu = buildContextMenu()
+        if let event {
+            NSMenu.popUpContextMenu(menu, with: event, for: button)
+        } else {
+            statusItem?.menu = menu
+            button.performClick(nil)
+            statusItem?.menu = nil
+        }
+    }
+
+    private func buildContextMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        let (configuration, _) = currentConfiguration()
+        let toggleTitle = controller.isActive ? "Stop" : "Start"
+        let toggleItem = NSMenuItem(title: toggleTitle, action: #selector(toggleFromMenu), keyEquivalent: "")
+        toggleItem.target = self
+        toggleItem.isEnabled = controller.isActive || configuration.validationMessage == nil
+        menu.addItem(toggleItem)
+
+        let quickMenuItem = NSMenuItem(title: "Quick Duration", action: nil, keyEquivalent: "")
+        let quickMenu = NSMenu()
+        quickMenu.addItem(makeMenuItem(title: "5m", action: #selector(startQuickDuration5m)))
+        quickMenu.addItem(makeMenuItem(title: "15m", action: #selector(startQuickDuration15m)))
+        quickMenu.addItem(makeMenuItem(title: "30m", action: #selector(startQuickDuration30m)))
+        quickMenu.addItem(makeMenuItem(title: "1h", action: #selector(startQuickDuration1h)))
+        quickMenu.addItem(makeMenuItem(title: "2h", action: #selector(startQuickDuration2h)))
+        quickMenuItem.submenu = quickMenu
+        menu.addItem(quickMenuItem)
+
+        menu.addItem(.separator())
+
+        let pidItem = makeCaffeinatePidItem()
+        menu.addItem(pidItem)
+
+        let aboutItem = NSMenuItem(title: "About Barista", action: #selector(showAbout), keyEquivalent: "")
+        aboutItem.target = self
+        menu.addItem(aboutItem)
+
+        let quitItem = NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(quitItem)
+
+        return menu
+    }
+
+    private func makeMenuItem(title: String, action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        return item
+    }
+
+    private func makeCaffeinatePidItem() -> NSMenuItem {
+        if let info = CaffeinateController.trackedPidInfo() {
+            let title = info.isRunning
+                ? "Force Stop Caffeinate (PID \(info.pid))"
+                : "Clear stale Caffeinate PID (\(info.pid))"
+            let item = NSMenuItem(title: title, action: #selector(forceStopCaffeinate), keyEquivalent: "")
+            item.target = self
+            return item
+        }
+        let item = NSMenuItem(title: "No Caffeinate PID", action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        return item
+    }
+
+    @objc private func toggleFromMenu() {
+        setSessionModeManual()
+        let (configuration, summary) = currentConfiguration()
+        controller.toggle(with: configuration, summary: summary)
+    }
+
+    @objc private func startQuickDuration5m() { startQuickDuration(5, .minutes) }
+    @objc private func startQuickDuration15m() { startQuickDuration(15, .minutes) }
+    @objc private func startQuickDuration30m() { startQuickDuration(30, .minutes) }
+    @objc private func startQuickDuration1h() { startQuickDuration(1, .hours) }
+    @objc private func startQuickDuration2h() { startQuickDuration(2, .hours) }
+
+    private func startQuickDuration(_ value: Int, _ unit: DurationUnit) {
+        setDuration(value, unit)
+        let (configuration, summary) = currentConfiguration()
+        controller.restart(with: configuration, summary: summary)
+    }
+
+    @objc private func forceStopCaffeinate() {
+        if controller.isActive {
+            controller.stop()
+        }
+        CaffeinateController.terminateTrackedProcess()
+    }
+
+    private func setSessionModeManual() {
+        UserDefaults.standard.set(SessionMode.manual.rawValue, forKey: BaristaDefaults.sessionModeKey)
+    }
+
+    private func setDuration(_ value: Int, _ unit: DurationUnit) {
+        let defaults = UserDefaults.standard
+        defaults.set(value, forKey: BaristaDefaults.durationValueKey)
+        defaults.set(unit.rawValue, forKey: BaristaDefaults.durationUnitKey)
+        defaults.set(SessionMode.timeout.rawValue, forKey: BaristaDefaults.sessionModeKey)
+    }
+
+    @objc private func showAbout() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if self.aboutWindow == nil {
+                self.aboutWindow = self.buildAboutWindow()
+            }
+            guard let aboutWindow = self.aboutWindow else { return }
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            aboutWindow.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    @objc private func quitApp() {
+        controller.stop()
+        NSApplication.shared.terminate(nil)
+    }
+
+    private func updateStatusItemDisplay() {
+        guard let button = statusItem?.button else { return }
+        button.image = StatusIcon.image(active: controller.isActive)
+        if let labelText = menuLabelText() {
+            let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+            button.attributedTitle = NSAttributedString(string: labelText, attributes: [.font: font])
+        } else {
+            button.attributedTitle = NSAttributedString(string: "")
+            button.title = ""
+        }
+    }
+
+    private func menuLabelText() -> String? {
         guard controller.isActive else { return nil }
         if let remaining = controller.remainingTimeText {
             return remaining
@@ -79,10 +235,105 @@ struct BaristaApp: App {
         return "On"
     }
 
-    private var statusIcon: some View {
-        Image(nsImage: StatusIcon.image(active: controller.isActive))
-            .renderingMode(.template)
-            .frame(width: 18, height: 18)
+    private func buildAboutWindow() -> NSWindow {
+        let window = NSWindow(contentViewController: NSHostingController(rootView: AboutView()))
+        window.title = "About Barista"
+        window.styleMask = [.titled, .closable]
+        window.isReleasedWhenClosed = false
+        window.level = .floating
+        window.center()
+        return window
+    }
+
+    private func currentConfiguration() -> (configuration: CaffeinateConfiguration, summary: String) {
+        let defaults = UserDefaults.standard
+        let sessionModeRaw = defaults.string(forKey: BaristaDefaults.sessionModeKey) ?? SessionMode.manual.rawValue
+        let sessionMode = SessionMode(rawValue: sessionModeRaw) ?? .manual
+        let durationUnitRaw = defaults.string(forKey: BaristaDefaults.durationUnitKey) ?? DurationUnit.minutes.rawValue
+        let durationUnit = DurationUnit(rawValue: durationUnitRaw) ?? .minutes
+        let configuration = CaffeinateConfiguration(
+            preventDisplaySleep: defaults.bool(forKey: BaristaDefaults.preventDisplaySleepKey),
+            preventIdleSleep: defaults.bool(forKey: BaristaDefaults.preventIdleSleepKey),
+            preventDiskSleep: defaults.bool(forKey: BaristaDefaults.preventDiskSleepKey),
+            preventSystemSleep: defaults.bool(forKey: BaristaDefaults.preventSystemSleepKey),
+            declareUserActive: defaults.bool(forKey: BaristaDefaults.declareUserActiveKey),
+            sessionMode: sessionMode,
+            durationValue: defaults.integer(forKey: BaristaDefaults.durationValueKey),
+            durationUnit: durationUnit,
+            waitPidText: defaults.string(forKey: BaristaDefaults.waitPidKey) ?? "",
+            commandLine: defaults.string(forKey: BaristaDefaults.commandLineKey) ?? ""
+        )
+        var summary = configuration.configurationSummary
+        let waitPidName = defaults.string(forKey: BaristaDefaults.waitPidNameKey) ?? ""
+        if configuration.sessionMode == .waitPid, !waitPidName.isEmpty {
+            summary += " | \(waitPidName)"
+        }
+        return (configuration, summary)
+    }
+}
+
+private enum BaristaDefaults {
+    static let preventDisplaySleepKey = "barista.preventDisplaySleep"
+    static let preventIdleSleepKey = "barista.preventIdleSleep"
+    static let preventDiskSleepKey = "barista.preventDiskSleep"
+    static let preventSystemSleepKey = "barista.preventSystemSleep"
+    static let declareUserActiveKey = "barista.declareUserActive"
+    static let sessionModeKey = "barista.sessionMode"
+    static let durationValueKey = "barista.durationValue"
+    static let durationUnitKey = "barista.durationUnit"
+    static let waitPidKey = "barista.waitPid"
+    static let waitPidNameKey = "barista.waitPidName"
+    static let commandLineKey = "barista.commandLine"
+
+    static func register() {
+        UserDefaults.standard.register(defaults: [
+            preventDisplaySleepKey: false,
+            preventIdleSleepKey: true,
+            preventDiskSleepKey: false,
+            preventSystemSleepKey: false,
+            declareUserActiveKey: false,
+            sessionModeKey: SessionMode.manual.rawValue,
+            durationValueKey: 30,
+            durationUnitKey: DurationUnit.minutes.rawValue,
+            waitPidKey: "",
+            waitPidNameKey: "",
+            commandLineKey: ""
+        ])
+    }
+}
+
+struct BaristaPanelView: View {
+    @ObservedObject private var controller: CaffeinateController
+    @Environment(\.colorScheme) private var colorScheme
+    @StateObject private var panelVisibility = PanelVisibilityMonitor()
+
+    @AppStorage(BaristaDefaults.preventDisplaySleepKey) private var preventDisplaySleep: Bool = false
+    @AppStorage(BaristaDefaults.preventIdleSleepKey) private var preventIdleSleep: Bool = true
+    @AppStorage(BaristaDefaults.preventDiskSleepKey) private var preventDiskSleep: Bool = false
+    @AppStorage(BaristaDefaults.preventSystemSleepKey) private var preventSystemSleep: Bool = false
+    @AppStorage(BaristaDefaults.declareUserActiveKey) private var declareUserActive: Bool = false
+    @AppStorage(BaristaDefaults.sessionModeKey) private var sessionModeRaw: String = SessionMode.manual.rawValue
+    @AppStorage(BaristaDefaults.durationValueKey) private var durationValue: Int = 30
+    @AppStorage(BaristaDefaults.durationUnitKey) private var durationUnitRaw: String = DurationUnit.minutes.rawValue
+    @AppStorage(BaristaDefaults.waitPidKey) private var waitPidText: String = ""
+    @AppStorage(BaristaDefaults.waitPidNameKey) private var waitPidName: String = ""
+    @AppStorage(BaristaDefaults.commandLineKey) private var commandLine: String = ""
+
+    @State private var processList: [RunningProcess]
+    @State private var lastProcessRefresh: Date?
+    @State private var selectedProcessId: Int = -1
+    @State private var isSettingPidFromPicker: Bool = false
+    @State private var sectionHeight: CGFloat = 0
+
+    init(controller: CaffeinateController) {
+        _controller = ObservedObject(initialValue: controller)
+        let initialList = ProcessLister.fetch()
+        _processList = State(initialValue: initialList)
+        _lastProcessRefresh = State(initialValue: initialList.isEmpty ? nil : Date())
+    }
+
+    var body: some View {
+        content
     }
 
     private var content: some View {
@@ -132,10 +383,6 @@ struct BaristaApp: App {
         .background(panelBackground)
         .onAppear {
             syncSelectedProcess()
-            refreshAppearance()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NSApplicationDidChangeEffectiveAppearanceNotification"))) { _ in
-            refreshAppearance()
         }
     }
 
@@ -185,10 +432,7 @@ struct BaristaApp: App {
         }
     }
 
-    private func refreshAppearance() {
-        let appearance = NSApplication.shared.effectiveAppearance
-        isDarkMode = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-    }
+    private var isDarkMode: Bool { colorScheme == .dark }
 
     private var statusSection: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -243,17 +487,10 @@ struct BaristaApp: App {
                     isOn: $declareUserActive
                 )
 
-                if configuration.shouldShowSystemSleepNote {
-                    Text("Note: system sleep prevention only applies on AC power.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-
-                if configuration.shouldShowUserActiveNote {
-                    Text("Note: user active defaults to 5 seconds unless Duration mode is used.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+                noteLine("Note: system sleep prevention only applies on AC power.",
+                         isVisible: configuration.shouldShowSystemSleepNote)
+                noteLine("Note: user active defaults to 5 seconds unless Duration mode is used.",
+                         isVisible: configuration.shouldShowUserActiveNote)
             }
             .background(SectionHeightReader())
             .frame(minHeight: sectionHeight, alignment: .topLeading)
@@ -287,6 +524,16 @@ struct BaristaApp: App {
         }
     }
 
+    private func noteLine(_ text: String, isVisible: Bool) -> some View {
+        Text(text)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .frame(minHeight: 12, alignment: .leading)
+            .opacity(isVisible ? 1 : 0)
+            .accessibilityHidden(!isVisible)
+    }
+
     @ViewBuilder
     private var sessionModeOptions: some View {
         switch sessionMode {
@@ -298,6 +545,7 @@ struct BaristaApp: App {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     TextField("Duration", value: $durationValue, format: .number)
+                        .textFieldStyle(TranslucentTextFieldStyle())
                         .frame(width: 80)
                     Picker("Unit", selection: $durationUnitRaw) {
                         ForEach(DurationUnit.allCases) { unit in
@@ -357,7 +605,7 @@ struct BaristaApp: App {
 
                 HStack(spacing: 8) {
                     TextField("PID", text: $waitPidText)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(TranslucentTextFieldStyle())
                         .frame(width: 140)
                         .onChange(of: waitPidText) { _ in
                             if isSettingPidFromPicker {
@@ -386,7 +634,7 @@ struct BaristaApp: App {
         case .command:
             VStack(alignment: .leading, spacing: 8) {
                 TextField("Command", text: $commandLine)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(TranslucentTextFieldStyle())
                 let message = (!controller.isActive ? configuration.validationMessage : nil)
                 Text(message ?? " ")
                     .font(.caption2)
@@ -523,6 +771,113 @@ private struct OutlineCheckboxStyle: ToggleStyle {
         }
         .buttonStyle(.plain)
     }
+}
+
+private struct TranslucentTextFieldStyle: TextFieldStyle {
+    @Environment(\.colorScheme) private var colorScheme
+
+    func _body(configuration: TextField<_Label>) -> some View {
+        let strokeOpacity: Double = colorScheme == .dark ? 0.25 : 0.2
+        configuration
+            .textFieldStyle(.plain)
+            .padding(.vertical, 4)
+            .padding(.horizontal, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(Color.primary.opacity(strokeOpacity), lineWidth: 1)
+            )
+    }
+}
+
+private struct AboutView: View {
+    private let appName: String
+    private let versionValue: String
+    private let buildValue: String?
+    private let repoURL = URL(string: "https://github.com/mdsakalu/barista")!
+    private let repoLabel = "mdsakalu/barista"
+    @State private var isHoveringLink = false
+
+    init() {
+        let bundle = Bundle.main
+        appName = bundle.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Barista"
+        let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        versionValue = version ?? "dev"
+        buildValue = build
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(nsImage: StatusIcon.image(active: true))
+                .resizable()
+                .scaledToFit()
+                .frame(width: 48, height: 48)
+                .foregroundStyle(.primary)
+            Text(appName)
+                .font(.title2)
+                .fontWeight(.semibold)
+            VStack(spacing: 4) {
+                aboutInfoRow(label: "Version", value: versionValue)
+                if let buildValue {
+                    aboutInfoRow(label: "Build", value: buildValue)
+                }
+            }
+            Button {
+                NSWorkspace.shared.open(repoURL)
+            } label: {
+                HStack(spacing: 6) {
+                    if let mark = GitHubMark.image {
+                        Image(nsImage: mark)
+                            .resizable()
+                            .renderingMode(.original)
+                            .scaledToFit()
+                            .frame(width: 12, height: 12)
+                            .padding(3)
+                            .background(Circle().fill(Color.black.opacity(0.75)))
+                    }
+                    Text(repoLabel)
+                        .underline(isHoveringLink, color: Color.primary.opacity(0.7))
+                }
+            }
+            .buttonStyle(.plain)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                isHoveringLink = hovering
+                if hovering {
+                    NSCursor.pointingHand.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+        }
+        .padding(20)
+        .frame(width: 260)
+    }
+
+    private func aboutInfoRow(label: String, value: String) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .frame(width: 54, alignment: .trailing)
+            Text(value)
+                .monospacedDigit()
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+    }
+}
+
+private enum GitHubMark {
+    static let image: NSImage? = {
+        guard let url = Bundle.module.url(forResource: "GitHub-Mark", withExtension: "png"),
+              let image = NSImage(contentsOf: url) else {
+            return nil
+        }
+        return image
+    }()
 }
 
 private struct RadioRow: View {
