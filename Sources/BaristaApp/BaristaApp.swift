@@ -82,6 +82,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         let anchorRect = popoverAnchorRect(for: button)
         popover.show(relativeTo: anchorRect, of: button, preferredEdge: .minY)
+        clampPopoverToScreen()
+    }
+
+    private func clampPopoverToScreen() {
+        guard let popoverWindow = popover.contentViewController?.view.window,
+              let screen = popoverWindow.screen ?? NSScreen.main
+        else { return }
+
+        let visibleFrame = screen.visibleFrame
+        var frame = popoverWindow.frame
+
+        if frame.maxX > visibleFrame.maxX {
+            frame.origin.x = visibleFrame.maxX - frame.width
+        }
+        if frame.minX < visibleFrame.minX {
+            frame.origin.x = visibleFrame.minX
+        }
+        if frame.minY < visibleFrame.minY {
+            frame.origin.y = visibleFrame.minY
+        }
+
+        if frame != popoverWindow.frame {
+            popoverWindow.setFrame(frame, display: false)
+        }
     }
 
     private func popoverAnchorRect(for button: NSStatusBarButton) -> NSRect {
