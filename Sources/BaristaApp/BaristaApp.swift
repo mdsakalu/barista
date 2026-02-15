@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let popover = NSPopover()
     private var aboutWindow: NSWindow?
     private var cancellables: Set<AnyCancellable> = []
+    private var popoverFrameObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         BaristaDefaults.register()
@@ -82,29 +83,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         let anchorRect = popoverAnchorRect(for: button)
         popover.show(relativeTo: anchorRect, of: button, preferredEdge: .minY)
-        clampPopoverToScreen()
+        startClampingPopover()
     }
 
-    private func clampPopoverToScreen() {
-        guard let popoverWindow = popover.contentViewController?.view.window,
-              let screen = popoverWindow.screen ?? NSScreen.main
-        else { return }
+    private func startClampingPopover() {
+        stopClampingPopover()
+        guard let popoverWindow = popover.contentViewController?.view.window else { return }
 
-        let visibleFrame = screen.visibleFrame
-        var frame = popoverWindow.frame
+        // Clamp immediately, then observe every frame change so animation can't escape.
+        clampWindow(popoverWindow)
 
-        if frame.maxX > visibleFrame.maxX {
-            frame.origin.x = visibleFrame.maxX - frame.width
-        }
-        if frame.minX < visibleFrame.minX {
-            frame.origin.x = visibleFrame.minX
-        }
-        if frame.minY < visibleFrame.minY {
-            frame.origin.y = visibleFrame.minY
+        popoverFrameObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: popoverWindow,
+            queue: .main
+        ) { [weak self, weak popoverWindow] _ in
+            guard let window = popoverWindow else { return }
+            self?.clampWindow(window)
         }
 
-        if frame != popoverWindow.frame {
-            popoverWindow.setFrame(frame, display: false)
+        // Also observe close to tear down.
+        cancellables.insert(
+            NotificationCenter.default.publisher(for: NSPopover.didCloseNotification, object: popover)
+                .first()
+                .sink { [weak self] _ in self?.stopClampingPopover() }
+        )
+    }
+
+    private func stopClampingPopover() {
+        if let observer = popoverFrameObserver {
+            NotificationCenter.default.removeObserver(observer)
+            popoverFrameObserver = nil
+        }
+    }
+
+    private func clampWindow(_ window: NSWindow) {
+        guard let screen = window.screen ?? NSScreen.main else { return }
+
+        let visible = screen.visibleFrame
+        var frame = window.frame
+
+        if frame.maxX > visible.maxX {
+            frame.origin.x = visible.maxX - frame.width
+        }
+        if frame.minX < visible.minX {
+            frame.origin.x = visible.minX
+        }
+        if frame.minY < visible.minY {
+            frame.origin.y = visible.minY
+        }
+
+        if frame != window.frame {
+            window.setFrame(frame, display: false)
         }
     }
 
