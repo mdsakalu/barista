@@ -107,7 +107,9 @@ struct CaffeinateConfiguration: Equatable {
     }
 
     var durationSeconds: Int {
-        max(0, durationValue) * durationUnit.multiplier
+        let value = max(0, durationValue)
+        let result = value.multipliedReportingOverflow(by: durationUnit.multiplier)
+        return result.overflow ? Int.max : result.partialValue
     }
 
     var waitPidValue: Int? {

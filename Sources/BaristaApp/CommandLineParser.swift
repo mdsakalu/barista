@@ -12,45 +12,52 @@ struct CommandLineParser {
         var inSingleQuote = false
         var inDoubleQuote = false
         var isEscaped = false
+        var argumentStarted = false
 
         for char in input {
             if isEscaped {
                 current.append(char)
+                argumentStarted = true
                 isEscaped = false
                 continue
             }
 
             if char == "\\" && !inSingleQuote {
+                argumentStarted = true
                 isEscaped = true
                 continue
             }
 
             if char == "\"" && !inSingleQuote {
+                argumentStarted = true
                 inDoubleQuote.toggle()
                 continue
             }
 
             if char == "'" && !inDoubleQuote {
+                argumentStarted = true
                 inSingleQuote.toggle()
                 continue
             }
 
             if char.isWhitespace && !inSingleQuote && !inDoubleQuote {
-                if !current.isEmpty {
+                if argumentStarted {
                     args.append(current)
                     current = ""
+                    argumentStarted = false
                 }
                 continue
             }
 
             current.append(char)
+            argumentStarted = true
         }
 
         if isEscaped || inSingleQuote || inDoubleQuote {
             return nil
         }
 
-        if !current.isEmpty {
+        if argumentStarted {
             args.append(current)
         }
 
