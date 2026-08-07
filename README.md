@@ -39,14 +39,21 @@ A menu bar app that wraps `/usr/bin/caffeinate` for quick keep-awake control
 
 ```sh
 brew tap mdsakalu/tap
+brew trust mdsakalu/tap
 brew install --cask barista
 ```
 
 > **Tip:** To install without sudo, add `--appdir=~/Applications`
 
+Barista is ad-hoc signed rather than Developer ID signed or notarized. The trusted
+personal cask removes only Barista's quarantine attribute after verifying the
+release checksum. Review the tap before trusting it.
+
 ### Manual
 
 Download `Barista-macos.zip` from [Releases](https://github.com/mdsakalu/barista/releases), unzip, and drag `Barista.app` to Applications.
+On first launch, macOS may require **Open Anyway** in Privacy & Security because
+the app is not notarized.
 
 ## Build
 
@@ -56,6 +63,8 @@ scripts/package_app.sh build
 ```
 
 The packaged app will be at `build/Barista.app`.
+The build script places resources in the standard app-bundle layout, applies a
+valid ad-hoc signature, and verifies the resulting bundle.
 
 ## Development
 

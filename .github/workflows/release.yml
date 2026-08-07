@@ -12,30 +12,58 @@ jobs:
   release:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - name: Build
-        run: swift build -c release
+      - name: Test
+        run: swift test
 
-      - name: Package app
-        run: scripts/package_app.sh build
+      - name: Test release tooling
+        run: ruby Tests/Packaging/RenderCaskTests.rb
+
+      - name: Build and package app
+        run: |
+          BARISTA_VERSION="${GITHUB_REF_NAME#v}" \
+            BARISTA_BUILD="$GITHUB_RUN_NUMBER" \
+            scripts/build_app.sh
 
       - name: Archive app
         run: |
           ditto -c -k --sequesterRsrc --keepParent build/Barista.app build/Barista-macos.zip
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: build/Barista-macos.zip
+          fail_on_unmatched_files: true
           generate_release_notes: true
 
-      - name: Update Homebrew tap
-        uses: mislav/bump-homebrew-formula-action@v3
+      - name: Check out Homebrew tap
+        uses: actions/checkout@v7
         with:
-          formula-name: barista
-          formula-path: Casks/barista.rb
-          homebrew-tap: mdsakalu/homebrew-tap
-          download-url: https://github.com/mdsakalu/barista/releases/download/${{ github.ref_name }}/Barista-macos.zip
+          repository: mdsakalu/homebrew-tap
+          ref: main
+          path: homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Publish Homebrew cask
         env:
-          COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          BARISTA_TAG: ${{ github.ref_name }}
+        run: |
+          cask_version="${BARISTA_TAG#v}"
+          cask_sha256="$(shasum -a 256 build/Barista-macos.zip | awk '{print $1}')"
+          ruby scripts/render_cask.rb \
+            Casks/barista.rb \
+            homebrew-tap/Casks/barista.rb \
+            "$cask_version" \
+            "$cask_sha256"
+
+          cd homebrew-tap || exit 1
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/barista.rb
+          if git diff --cached --quiet; then
+            echo "Homebrew cask is already current."
+          else
+            git commit -m "barista $cask_version"
+            git push origin HEAD:main
+          fi

@@ -8,20 +8,25 @@ jobs:
   build:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - name: Build
-        run: swift build -c release
+      - name: Test
+        run: swift test
 
-      - name: Package app
-        run: scripts/package_app.sh build
+      - name: Test release tooling
+        run: ruby Tests/Packaging/RenderCaskTests.rb
+
+      - name: Build and package app
+        run: scripts/build_app.sh
+        env:
+          BARISTA_BUILD: ${{ github.run_number }}
 
       - name: Archive app
         run: |
           ditto -c -k --sequesterRsrc --keepParent build/Barista.app build/Barista-macos.zip
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Barista-macos
           path: build/Barista-macos.zip
