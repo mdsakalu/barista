@@ -5,49 +5,49 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let controller = CaffeinateController()
     private var statusItem: NSStatusItem?
-    private let popover = NSPopover()
-    private var hostingController: NSHostingController<BaristaPanelView>?
-    private var currentPopoverLayout: PopoverLayout?
+    private var panelPresenter: StatusPanelPresenter?
     private var aboutWindow: NSWindow?
     private var cancellables: Set<AnyCancellable> = []
-    private var popoverFrameObserver: NSObjectProtocol?
+    private var localEventMonitor: Any?
+    private var globalEventMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         BaristaDefaults.register()
         CaffeinateController.cleanupOrphanedProcess()
         NSApp.setActivationPolicy(.accessory)
-        setupPopover()
+        setupPanel()
         setupStatusItem()
         observeController()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        removeEventMonitors()
+        panelPresenter?.close()
         controller.stop()
     }
 
-    private func setupPopover() {
-        let layout = PopoverLayoutPolicy.layout(
-            forVisibleSize: NSScreen.main?.visibleFrame.size ?? CGSize(width: 640, height: 800)
-        )
+    private func setupPanel() {
+        let layout = PanelLayoutPolicy.layout
         let panelView = BaristaPanelView(controller: controller, layout: layout)
         let hostingController = NSHostingController(rootView: panelView)
-        self.hostingController = hostingController
-        currentPopoverLayout = layout
-        popover.contentViewController = hostingController
-        popover.behavior = .transient
-        popover.animates = true
+        hostingController.preferredContentSize = layout.contentSize
+        panelPresenter = StatusPanelPresenter(
+            contentViewController: hostingController,
+            contentSize: layout.contentSize
+        )
     }
 
     private func setupStatusItem() {
-        statusItem = NSStatusBar.system.statusItem(withLength: StatusItemPresentation.fixedLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: StatusItemPresentation.length)
         guard let button = statusItem?.button else { return }
-        button.image = StatusIcon.image(active: controller.isActive)
-        button.image?.isTemplate = true
+        button.imagePosition = StatusItemPresentation.imagePosition
         button.setAccessibilityLabel("Barista")
         button.target = self
         button.action = #selector(handleStatusItemClick(_:))
-        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        button.sendAction(on: StatusItemPresentation.actionMask)
+
         updateStatusItemDisplay()
+        installLocalEventMonitor()
     }
 
     private func observeController() {
@@ -58,97 +58,108 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.updateStatusItemDisplay()
             }
             .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.closePanel()
+            }
+            .store(in: &cancellables)
     }
 
     @objc private func handleStatusItemClick(_ sender: NSStatusBarButton) {
         let event = NSApp.currentEvent
         if event?.type == .rightMouseUp || event?.type == .rightMouseDown {
-            if popover.isShown {
-                popover.performClose(nil)
-            }
+            closePanel()
             showContextMenu(event: event, button: sender)
         } else {
-            togglePopover(button: sender)
+            togglePanel(button: sender)
         }
     }
 
-    private func togglePopover(button: NSStatusBarButton) {
-        if popover.isShown {
-            popover.performClose(nil)
-            return
-        }
-        NSApp.activate(ignoringOtherApps: true)
-        updatePopoverLayout(for: button.window?.screen)
-        let anchorRect = popoverAnchorRect(for: button)
-        popover.show(relativeTo: anchorRect, of: button, preferredEdge: .minY)
-        startClampingPopover()
-    }
-
-    private func updatePopoverLayout(for screen: NSScreen?) {
-        let visibleSize = (screen ?? NSScreen.main)?.visibleFrame.size
-            ?? CGSize(width: 640, height: 800)
-        let layout = PopoverLayoutPolicy.layout(forVisibleSize: visibleSize)
-        guard layout != currentPopoverLayout, let hostingController else { return }
-
-        hostingController.rootView = BaristaPanelView(controller: controller, layout: layout)
-        hostingController.view.layoutSubtreeIfNeeded()
-        currentPopoverLayout = layout
-    }
-
-    private func startClampingPopover() {
-        stopClampingPopover()
-        guard let popoverWindow = popover.contentViewController?.view.window else { return }
-
-        // Clamp immediately, then observe every frame change so animation can't escape.
-        clampWindow(popoverWindow)
-
-        popoverFrameObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didMoveNotification,
-            object: popoverWindow,
-            queue: .main
-        ) { [weak self, weak popoverWindow] _ in
-            guard let window = popoverWindow else { return }
-            self?.clampWindow(window)
-        }
-
-        // Also observe close to tear down.
-        cancellables.insert(
-            NotificationCenter.default.publisher(for: NSPopover.didCloseNotification, object: popover)
-                .first()
-                .sink { [weak self] _ in self?.stopClampingPopover() }
+    private func togglePanel(button: NSStatusBarButton) {
+        guard let panelPresenter else { return }
+        let isShown = panelPresenter.toggle(
+            relativeTo: button,
+            anchorRect: StatusItemPresentation.anchorRect(in: button.bounds)
         )
-    }
-
-    private func stopClampingPopover() {
-        if let observer = popoverFrameObserver {
-            NotificationCenter.default.removeObserver(observer)
-            popoverFrameObserver = nil
+        if isShown {
+            installGlobalEventMonitor()
+        } else {
+            removeGlobalEventMonitor()
         }
     }
 
-    private func clampWindow(_ window: NSWindow) {
-        guard let screen = window.screen ?? NSScreen.main else { return }
+    private func closePanel() {
+        removeGlobalEventMonitor()
+        panelPresenter?.close()
+    }
 
-        let visible = screen.visibleFrame
-        var frame = window.frame
+    private func installLocalEventMonitor() {
+        guard localEventMonitor == nil else { return }
+        localEventMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .keyDown]
+        ) { [weak self] event in
+            guard let self else { return event }
 
-        if frame.maxX > visible.maxX {
-            frame.origin.x = visible.maxX - frame.width
-        }
-        if frame.minX < visible.minX {
-            frame.origin.x = visible.minX
-        }
-        if frame.minY < visible.minY {
-            frame.origin.y = visible.minY
-        }
+            if event.type == .keyDown, event.keyCode == 53, self.panelPresenter?.isShown == true {
+                self.closePanel()
+                return nil
+            }
 
-        if frame != window.frame {
-            window.setFrame(frame, display: false)
+            if let button = self.statusItemButton(targetedBy: event) {
+                if event.type == .rightMouseDown {
+                    self.closePanel()
+                    self.showContextMenu(event: event, button: button)
+                    return nil
+                }
+                return event
+            }
+
+            if self.panelPresenter?.isShown == true,
+               self.panelPresenter?.owns(event) == false {
+                self.closePanel()
+            }
+            return event
         }
     }
 
-    private func popoverAnchorRect(for button: NSStatusBarButton) -> NSRect {
-        StatusItemPresentation.anchorRect(in: button.bounds)
+    private func installGlobalEventMonitor() {
+        guard globalEventMonitor == nil else { return }
+        globalEventMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]
+        ) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.closePanel()
+            }
+        }
+    }
+
+    private func removeEventMonitors() {
+        removeGlobalEventMonitor()
+        if let localEventMonitor {
+            NSEvent.removeMonitor(localEventMonitor)
+            self.localEventMonitor = nil
+        }
+    }
+
+    private func removeGlobalEventMonitor() {
+        if let globalEventMonitor {
+            NSEvent.removeMonitor(globalEventMonitor)
+            self.globalEventMonitor = nil
+        }
+    }
+
+    private func event(_ event: NSEvent, targets button: NSStatusBarButton) -> Bool {
+        guard event.window === button.window else { return false }
+        let point = button.convert(event.locationInWindow, from: nil)
+        return button.bounds.contains(point)
+    }
+
+    private func statusItemButton(targetedBy event: NSEvent) -> NSStatusBarButton? {
+        guard let button = statusItem?.button,
+              self.event(event, targets: button) else { return nil }
+        return button
     }
 
     private func showContextMenu(event: NSEvent?, button: NSStatusBarButton) {
@@ -283,8 +294,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ofSize: NSFont.systemFontSize,
             weight: .regular
         )
-
         button.image = StatusIcon.image(active: controller.isActive)
+        button.image?.isTemplate = true
+        button.imagePosition = StatusItemPresentation.imagePosition
         button.attributedTitle = NSAttributedString(
             string: presentation.title,
             attributes: [.font: font]
@@ -328,4 +340,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         return (configuration, summary)
     }
+
 }

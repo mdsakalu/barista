@@ -1,15 +1,17 @@
 import AppKit
 
 struct StatusItemPresentation {
-    static let fixedLength: CGFloat = 100
+    static let length = NSStatusItem.variableLength
+    static let iconRegionWidth: CGFloat = 36
+    static let actionMask: NSEvent.EventTypeMask = [.leftMouseDown]
+    static let imagePosition: NSControl.ImagePosition = .imageRight
 
     let title: String
     let accessibilityValue: String
 
     init(isActive: Bool, remainingTimeText: String?) {
         guard isActive else {
-            // A non-empty title keeps NSStatusBarButton at the same height as its active state.
-            title = " "
+            title = ""
             accessibilityValue = "Inactive"
             return
         }
@@ -25,7 +27,7 @@ struct StatusItemPresentation {
 
     static func anchorRect(in bounds: NSRect) -> NSRect {
         NSRect(
-            x: bounds.midX - 0.5,
+            x: max(bounds.minX, bounds.maxX - iconRegionWidth / 2 - 0.5),
             y: bounds.midY - 0.5,
             width: 1,
             height: 1

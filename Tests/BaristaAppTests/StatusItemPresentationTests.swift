@@ -3,26 +3,45 @@ import XCTest
 @testable import BaristaApp
 
 final class StatusItemPresentationTests: XCTestCase {
-    func testInactivePresentationKeepsStatusItemGeometryStable() {
+    func testInactivePresentationUsesOneCompactVariableLengthItem() {
         let presentation = StatusItemPresentation(isActive: false, remainingTimeText: nil)
 
-        XCTAssertEqual(StatusItemPresentation.fixedLength, 100)
-        XCTAssertEqual(presentation.title, " ")
+        XCTAssertEqual(StatusItemPresentation.length, NSStatusItem.variableLength)
+        XCTAssertEqual(StatusItemPresentation.iconRegionWidth, 36)
+        XCTAssertEqual(StatusItemPresentation.actionMask, [.leftMouseDown])
+        XCTAssertEqual(StatusItemPresentation.imagePosition, .imageRight)
+        XCTAssertEqual(presentation.title, "")
         XCTAssertEqual(presentation.accessibilityValue, "Inactive")
     }
 
-    func testActivePresentationUsesCountdownWhenAvailable() {
+    func testActivePresentationDisplaysCountdownAndExposesItAccessibly() {
         let presentation = StatusItemPresentation(isActive: true, remainingTimeText: "1:00:00")
 
         XCTAssertEqual(presentation.title, "1:00:00")
         XCTAssertEqual(presentation.accessibilityValue, "Active, 1:00:00 remaining")
     }
 
-    func testAnchorUsesStableCenterPoint() {
-        let anchor = StatusItemPresentation.anchorRect(
-            in: NSRect(x: 0, y: 0, width: 100, height: 22)
-        )
+    func testUntimedActivePresentationUsesCompactOnLabel() {
+        let presentation = StatusItemPresentation(isActive: true, remainingTimeText: nil)
 
-        XCTAssertEqual(anchor, NSRect(x: 49.5, y: 10.5, width: 1, height: 1))
+        XCTAssertEqual(presentation.title, "On")
+        XCTAssertEqual(presentation.accessibilityValue, "Active")
+    }
+
+    func testStatusIconUsesMenuBarDimensions() {
+        XCTAssertEqual(StatusIcon.image(active: false).size, NSSize(width: 18, height: 18))
+        XCTAssertEqual(StatusIcon.image(active: true).size, NSSize(width: 18, height: 18))
+    }
+
+    func testPanelAnchorStaysInTheTrailingIconRegion() {
+        let inactiveBounds = NSRect(x: 0, y: 0, width: 36, height: 22)
+        let activeBounds = NSRect(x: 0, y: 0, width: 79, height: 22)
+        let inactiveAnchor = StatusItemPresentation.anchorRect(in: inactiveBounds)
+        let activeAnchor = StatusItemPresentation.anchorRect(in: activeBounds)
+
+        XCTAssertEqual(inactiveBounds.maxX - inactiveAnchor.midX, 18)
+        XCTAssertEqual(activeBounds.maxX - activeAnchor.midX, 18)
+        XCTAssertEqual(inactiveAnchor.midY, inactiveBounds.midY)
+        XCTAssertEqual(activeAnchor.midY, activeBounds.midY)
     }
 }

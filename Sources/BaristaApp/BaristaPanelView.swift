@@ -5,7 +5,7 @@ struct BaristaPanelView: View {
     @ObservedObject private var controller: CaffeinateController
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var panelVisibility = PanelVisibilityMonitor()
-    private let layout: PopoverLayout
+    private let layout: PanelLayout
 
     @AppStorage(BaristaDefaults.preventDisplaySleepKey) private var preventDisplaySleep: Bool = false
     @AppStorage(BaristaDefaults.preventIdleSleepKey) private var preventIdleSleep: Bool = true
@@ -25,7 +25,7 @@ struct BaristaPanelView: View {
     @State private var isSettingPidFromPicker: Bool = false
     @State private var sectionHeight: CGFloat = 0
 
-    init(controller: CaffeinateController, layout: PopoverLayout) {
+    init(controller: CaffeinateController, layout: PanelLayout) {
         _controller = ObservedObject(initialValue: controller)
         self.layout = layout
         let initialList = ProcessLister.fetch()
@@ -34,13 +34,19 @@ struct BaristaPanelView: View {
     }
 
     var body: some View {
-        ScrollView(.vertical) {
-            content
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(width: layout.contentWidth)
-        .frame(maxHeight: layout.maximumContentHeight)
-        .background(panelBackground)
+        content
+            .frame(
+                width: layout.contentSize.width,
+                height: layout.contentSize.height,
+                alignment: .topLeading
+            )
+            .background(panelBackground)
+            .clipShape(RoundedRectangle(cornerRadius: PanelLayoutPolicy.cornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: PanelLayoutPolicy.cornerRadius, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
     }
 
     private var content: some View {
@@ -85,29 +91,19 @@ struct BaristaPanelView: View {
         }
     }
 
-    @ViewBuilder
     private var configurationSections: some View {
-        if layout.stacksSections {
-            VStack(alignment: .leading, spacing: 16) {
-                assertionsSection
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                sessionSection
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .onPreferenceChange(SectionHeightKey.self) { sectionHeight = $0 }
-        } else {
-            HStack(alignment: .firstTextBaseline, spacing: 16) {
-                assertionsSection
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                sessionSection
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .onPreferenceChange(SectionHeightKey.self) { sectionHeight = $0 }
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
+            assertionsSection
+                .frame(maxWidth: .infinity, alignment: .leading)
+            sessionSection
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .onPreferenceChange(SectionHeightKey.self) { sectionHeight = $0 }
     }
 
     private var panelBackground: some View {
         ZStack {
+            Color(nsColor: .windowBackgroundColor)
             if let image = PanelBackground.image {
                 GeometryReader { geo in
                     panelBackgroundImage(image, size: geo.size)
@@ -213,7 +209,7 @@ struct BaristaPanelView: View {
                          isVisible: configuration.shouldShowUserActiveNote)
             }
             .background(SectionHeightReader())
-            .frame(minHeight: layout.stacksSections ? nil : sectionHeight, alignment: .topLeading)
+            .frame(minHeight: sectionHeight, alignment: .topLeading)
             .allowsHitTesting(!controller.isActive)
             .opacity(controller.isActive ? 0.48 : 1)
         }
@@ -238,7 +234,7 @@ struct BaristaPanelView: View {
                     .frame(height: SessionModePanel.height, alignment: .topLeading)
             }
             .background(SectionHeightReader())
-            .frame(minHeight: layout.stacksSections ? nil : sectionHeight, alignment: .topLeading)
+            .frame(minHeight: sectionHeight, alignment: .topLeading)
             .allowsHitTesting(!controller.isActive)
             .opacity(controller.isActive ? 0.48 : 1)
         }
@@ -284,7 +280,7 @@ struct BaristaPanelView: View {
                     Button("2h") { setDuration(2, .hours) }
                 }
 
-                Text("Menu bar shows a live countdown while running.")
+                Text("Countdown also appears beside the menu bar icon.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
